@@ -1,5 +1,5 @@
-﻿# version 1.1
-# 2023.08.24
+# version 1.1
+# 2023.09.14
 # https://github.com/digitalParkour/OCToolbox
 
 param (
@@ -682,19 +682,26 @@ function Get-ListRequest([OcDefn]$defn)
         $deps= Get-DependentSlugs -deps $defn.LivesUnder
         foreach($dep in $deps)
         {
-            $request = @{
-                verb = "GET"
-                url = "$($dep.depSlug)/$($slug)"
-            };
-
-            $items = Invoke-OcRequestAll $request
-            if($items)
+            if($dep.depIds)
             {
-                foreach($item in $items)
+                $request = @{
+                    verb = "GET"
+                    url = "$($dep.depSlug)/$($slug)"
+                };
+
+                $items = Invoke-OcRequestAll $request
+
+                if($items)
                 {
-                    $item | Add-Member -NotePropertyName AncestorIDs -NotePropertyValue @($dep.depIds)
+                    foreach($item in $items)
+                    {
+                        if($item)
+                        {
+                            $item | Add-Member -NotePropertyName AncestorIDs -NotePropertyValue @($dep.depIds)
+                        }
+                    }
+                    $results = $results + $items
                 }
-                $results = $results + $items
             }
         }
     } else {
