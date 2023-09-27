@@ -1,4 +1,4 @@
-# OC Toolbox v1.1
+# OC Toolbox v1.2
 
 ![screenshot](./screenshot.png)
 
