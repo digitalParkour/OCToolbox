@@ -11,7 +11,7 @@
 | Report Tool | Pick properties and dump to csv. Get all beyond page size. Gather parent and child data together. |
 | Export Tool | Guided OC seed export for prompted marketplace. |
 | Import Tool | Extend OC seed mechanism to target any environment. |
-| Delete Tool | Quickly purge data for selected types. |
+| Delete Tool | Quickly purge data for selected types or by ID list. |
 
 ---
 
@@ -36,7 +36,7 @@ Demo: [Video Tour](https://clipchamp.com/watch/7CTIVyxEI0L) ~16 min
 The import tool requires the **PSYaml** module to parse yml files.
 
  - Goto: https://github.com/Phil-Factor/PSYaml
- - Copy files to %USERPROFILE%\Documents\WindowsPowerShell\Modules\PSYaml
+ - Copy files in the PSYaml subfolder to %USERPROFILE%\Documents\WindowsPowerShell\Modules\PSYaml
 
 If you download the files to a different folder, edit this line near the top of OCToolbox.ps1:
 
@@ -47,6 +47,12 @@ If you download the files to a different folder, edit this line near the top of 
 ---
 
 ## RELEASES
+
+### v1.2 - 2023.09.27
+
+Feature:
+
+ - Delete by ID Tool - Added a new choice to the Delete Tool to delete entities given a txt file of IDs.
 
 ### v1.1 - 2023.08.24
 
