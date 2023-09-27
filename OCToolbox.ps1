@@ -1,5 +1,5 @@
-# version 1.1
-# 2023.09.14
+# version 1.2
+# 2023.09.27
 # https://github.com/digitalParkour/OCToolbox
 
 param (
@@ -2695,15 +2695,177 @@ function Get-NewClientId($oldId)
 # ////////////////////////////////////////////////////////////////////////////////////////////////
 function Invoke-DeleteProgram
 {
-    Write-Host "TOOL: Delete Data by Root Type"
+    $deleteByFile = 'Delete from ID List...'
+    $deleteByEntity = 'Delete by Entity...'
 
+    $deletionTypeMenu = @(
+    $deleteByFile,
+    $deleteByEntity,
+    'Exit' )
+
+    Write-Host "TOOL: Delete Data by Root Type or ID File"
     Invoke-ConfirmContext
+    $deletionTypeChoice = Get-FromChoiceMenu "Choose how you want to delete entities:" $deletionTypeMenu
+
+    switch($deletionTypeChoice)
+    {
+        $deleteByFile {
+            Invoke-DeleteByIdList
+        }
+        $deleteByEntity {
+            Invoke-DeleteByEntity
+        }
+        'Exit' {
+            Write-Host 'Goodbye' -ForegroundColor Cyan
+            $exit = $true
+        }
+    }
+}
+
+function Invoke-DeleteByIdList
+{
+    $allEntities = $defns | where { ($_.Type -eq [OcType]::Entity) -and ($_.Name -ne 'Variants') } | % { $_.Name } | Sort-Object
+    $typeToPurge = Get-FromChoiceMenu "Which entity type matches your text file of IDs?" $allEntities
+    $selectedEntityTypeToDelete = $defns | where {  $_.Type -eq [OcType]::Entity -and $_.Name -eq $typeToPurge } | Select -First 1
+
+    Write-Host "TOOL: Import deletion id txt file"
+    Write-Host "Please note that entities that rely on parent IDs must be in ParentID:ChildID format per line."
+
+    # Gather inputs
+    $idFile = ""
+    do {
+        # Get *.txt file names in current directory sorted most recent on top
+        $files = @(Get-ChildItem -Path "$(pwd)\*.txt" | Sort-Object -Property LastWriteTime -Descending | % {$_.Name}) + @('Try Again')
+        # User to pick one
+        $idFile = Get-FromChoiceMenu "Choose id txt file from current directory (if none shown, copy your <MyIdFileName>.txt to $(pwd) and try again):" $files
+    } while ($idFile -eq "Try Again")
+
+    $idFile = "$(pwd)\$idFile"
+    Write-Host
+    Write-Host "Id file: $idFile" -ForegroundColor Yellow
+
+    # Validate id file
+    # Get-Help Get-Content -Full
+    $idLines = Get-Content -Path $idFile
+    $count = 0;
+    $resultsSummary = @()
+    $invalidLines = @()
+    $validIDs = @()
+    foreach($id in $idLines)
+    {
+        $count++
+        # Write-Host "Now reading line '$id'"
+        # Support requests with multiple IDs
+        if($selectedEntityTypeToDelete.LivesUnder -or $id.Contains(':'))
+        {
+            $ids = $id.Split(':')
+            if($ids.Length -ne $selectedEntityTypeToDelete.LivesUnder.Length+1)
+            {
+                $newInvalidLineString = "Line $count : " + $id
+                $invalidLines += $newInvalidLineString
+                $resultsSummary += @{
+                    InputID = $id
+                    FinalStatus = "Skipped"
+                }
+                continue
+            }
+        }
+        $validIDs += $id
+    }
+    
+    if ($invalidLines.Length -gt 0)
+    {
+        Write-Host "$($invalidLines.Length) Invalid ID Lines detected for selected entity type $($selectedEntityTypeToDelete.Name). Expected $($selectedEntityTypeToDelete.LivesUnder.Length+1) IDs per line separated by colon(s) (eg. ParentID:ChildID)"
+        $invalidLines
+    }
+    
+    if ($validIDs.Length -gt 0)
+    {
+        # Verify target
+        Write-Host
+        Write-Host "Ready to Delete."
+        Write-Host "$($validIDs.Length) valid IDs found to be processed." -ForegroundColor Cyan
+        # Confirm
+        Write-Host
+
+        if((0 -ne $host.ui.PromptForChoice(
+        "",
+        'Run deletion on valid IDs?',
+        @(
+            [System.Management.Automation.Host.ChoiceDescription]::new("&Yes", "Yes, delete")
+            [System.Management.Automation.Host.ChoiceDescription]::new("&No", "No, cancel")
+        ),
+        0)))
+        {
+            return;
+        }
+
+        # Here Goes!
+        Write-Host
+        Write-Host "Purging $($selectedEntityTypeToDelete.Name) - $($validIDs.Length) records" -ForegroundColor Cyan
+        $count = 0
+        $failedDeletionRequests = @()
+        foreach($id in $validIDs)
+        {   
+            $count++ 
+            $prefix = ([string]$count).PadRight(3)
+            $deletionRequest = Get-DeleteRequest $selectedEntityTypeToDelete $id
+            Write-Host $prefix " Deleting $($deletionRequest.url)"
+            try {
+                $resp = Invoke-OcRequest($deletionRequest);
+            } catch {
+                Write-Host $prefix "StatusCode:" $_.Exception.Response.StatusCode.value__ 
+                Write-Host $prefix "StatusDescription:" $_.Exception.Response.StatusDescription
+                if($_.ErrorDetails.Message) {
+                    Write-Host $prefix $_.ErrorDetails.Message
+                }
+                $failedDeletionRequests += $deletionRequest.url
+                $resultsSummary += @{
+                    InputID = $id
+                    FinalStatus = "Error : $($_.Exception.Response.StatusDescription)"
+                }
+                continue
+            }
+            $resultsSummary += @{
+                InputID = $id
+                FinalStatus = "Deleted"
+            }
+        }
+
+        if ($failedDeletionRequests.Length -gt 0)
+        {
+            Write-Host
+            Write-Host "The following deletion requests failed" -ForegroundColor Red
+            $failedDeletionRequests
+        }
+        
+        Clear-Cache $($selectedEntityTypeToDelete.Name)
+
+        if ($resultsSummary.Length -gt 0)
+        {
+            $idFileBaseName = (Get-Item $idFile).BaseName
+            $currentTimestamp = Get-Date -Format "yyyyMMdd_HH_mm"
+            $fileName = "$idFileBaseName.results.$currentTimestamp.csv"
+            Invoke-ResultsFileGenerator $resultsSummary $fileName @("ID, Final Status")
+        }
+
+        Write-Host "Deletion by ID file done" -ForegroundColor Green
+    }
+    Else
+    {
+        Write-Host
+        Write-Host "No valid IDs found in file for given entity type. Please make sure you selected the correct txt file. Exiting..."
+        Write-Host "Expected line ID format: Expected $($selectedEntityTypeToDelete.LivesUnder.Length+1) IDs per line separated by colon(s) (eg. ParentID:ChildID for entities that depend on a parent)"
+    }
+}
+
+Function Invoke-DeleteByEntity 
+{
+    $allEntities = $defns | where { $_.Type -eq [OcType]::Entity -and -not $_.LivesUnder } | % { $_.Name } | Sort-Object
 
     # Only choose from root types (when OC deletes a root type it removes all subtypes)
     # ie. deleting product deletes all related variants, variant inventory, etc
-    $choices = $defns | where { $_.Type -eq [OcType]::Entity -and -not $_.LivesUnder } | % { $_.Name } | Sort-Object
-    $typesToPurge = Get-FromChoiceMenu "Choose Types To Purge?" $choices -allowMultiple
-
+    $typesToPurge = Get-FromChoiceMenu "Choose Types To Purge?" $allEntities -allowMultiple
     # Sort to honor dependencies, loop backwards, deleting non-dependent first
     $reverseSortedTypes = @()
     $testString = "abcdef"
@@ -2754,6 +2916,41 @@ function Invoke-DeleteProgram
     Write-Host "Purge Done" -ForegroundColor Green
 }
 
+Function Invoke-ResultsFileGenerator($resultsSummary, $fileName, $headerValues)
+{
+    if ($resultsSummary.Length -eq 0)
+    {
+        Write-Host "Invoke-ResultsFileGenerator: resultsSummary parameter is empty."
+        return
+    }
+    if (-not $fileName)
+    {
+        $currentTimestamp = Get-Date -Format "yyyyMMdd_HHmm"
+        $fileName = "results.$currentTimestamp.csv"
+    }
+    $outFile = $fileName.replace(" ","_")
+    if(-not $outFile.EndsWith('.csv'))
+    {
+        $outFile = "$($outFile).csv"
+    }
+    $outFile = "$(pwd)\$($outFile)"
+
+    # Write file
+    Write-Host "Audit log available at: $outFile" -ForegroundColor Cyan
+    $header = @($headerValues) -join ","
+    Set-Content -Path "$outFile" -Value $header
+
+    foreach($entry in $resultsSummary)
+    {
+        $row = "" 
+        $row = "$($entry.InputId), $($entry.FinalStatus)"
+            
+        Add-Content -Path "$outFile" -Value $row
+    }
+            
+    Write-Host "Audit log done" -ForegroundColor Green
+}
+
 #endregion
 
 # ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2767,7 +2964,6 @@ function Invoke-DeleteProgram
 # $id supports a format for cases of nested entities, ie: "PRODUCTID:VARIANTID"
 function Get-DeleteRequest([OcDefn]$defn, $id)
 {
-
     $slug = $defn.Name.ToLowerInvariant()
     if($defn.ApiName)
     {
@@ -2780,15 +2976,16 @@ function Get-DeleteRequest([OcDefn]$defn, $id)
     if($defn.LivesUnder -or $id.Contains(':'))
     {
         $ids = $id.Split(':')
-        if($ids.Length -ne $defn.LivesUnder.Length)
+        $url = "/$($slug)/$($ids[$ids.Length-1])"
+        if($ids.Length -ne $defn.LivesUnder.Length+1)
         {
-            throw "Type $($defn.Name) defn expected $($defn.LivesUnder.Length) multiple IDs but got mismatched input of $($ids.Length)"
+            throw "Type $($defn.Name) defn expected $($defn.LivesUnder.Length+1) multiple IDs but got mismatched input of $($ids.Length)"
         }
 
         $depUrl = ""
-        for($x = 0; $x -lt $ids.Length; $x++)
+        for($x = 0; $x -lt $ids.Length-1; $x++)
         {
-            $depUrl = "$depUrl/$($defn.LivesUnder[$x])/$($ids[$x])"
+            $depUrl += "/$($defn.LivesUnder[$x])/$($ids[$x])"
         }
         $url = "$($depUrl)$($url)"
     }
@@ -2846,7 +3043,8 @@ function Invoke-ReportProgram
     $defn = $defns | where { $_.Name -eq $choice }
 
     # 2. Choose Name
-    $defaultName = 'report'
+    $currentTimestamp = Get-Date -Format "yyyyMMdd_HHmm"
+    $defaultName = "$($defn.Name).$currentTimestamp"
     $outFile = Read-Host -Prompt "2. Report Name (enter for default, $defaultName)"
     if(-not $outFile)
     {
@@ -2912,11 +3110,18 @@ function Invoke-ReportProgram
         }
         $cols = Get-FromChoiceMenu "$bullet Choose $($defn.Name) Properties for Report:" $props -allowMultiple $defaults
 
-    # 4. Write file
+        # 4. Write file
         # Start file        
         Write-Host "Writing report to: $outFile" -ForegroundColor Cyan
 
-        $header = @(@($depHeader) + $cols) -join ","
+        if($depHeader.Length -eq 0)
+        {
+            $header = @($cols) -join ","
+        }
+        else {
+            $header = @(@($depHeader) + $cols) -join ","
+        }
+
         Set-Content -Path "$outFile" -Value $header
 
         foreach($entry in $list)
