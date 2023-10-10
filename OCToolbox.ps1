@@ -1,5 +1,5 @@
 # version 1.2
-# 2023.09.27
+# 2023.09.28
 # https://github.com/digitalParkour/OCToolbox
 
 param (
@@ -634,7 +634,7 @@ function Get-DependentSlugs([string[]]$deps, [DependentSlug]$baseObj = $null)
 
 
 # Expand $request to collect result items form all pages. Assumes GET style request with no body.
-function Invoke-OcRequestAll([OcRequest] $request)
+function Invoke-OcRequestAll([OcRequest] $request, $filter)
 {
     $pageSize = 100
     $items = @()
@@ -645,7 +645,7 @@ function Invoke-OcRequestAll([OcRequest] $request)
         $page++
         $pagedRequest = [OcRequest]@{
             verb = $request.verb
-            url = "$($request.url)?pageSize=$pageSize&page=$page"
+            url = "$($request.url)?$filter&pageSize=$pageSize&page=$page"
         }
 
         $response = Invoke-OcRequest $pagedRequest
@@ -664,7 +664,7 @@ function Invoke-OcRequestAll([OcRequest] $request)
 
 # Returns response.Items (across all pages) for given $defn type.
 # Caches results for quick reuse on the same tool (heavily used for reporting tool on nested objects).
-function Get-ListRequest([OcDefn]$defn)
+function Get-ListRequest([OcDefn]$defn, $filter)
 {
     $results = Get-Cache $defn.Name
     if($results)
@@ -689,7 +689,7 @@ function Get-ListRequest([OcDefn]$defn)
                     url = "$($dep.depSlug)/$($slug)"
                 };
 
-                $items = Invoke-OcRequestAll $request
+                $items = Invoke-OcRequestAll $request $filter
 
                 if($items)
                 {
@@ -3057,9 +3057,13 @@ function Invoke-ReportProgram
     }
     $outFile = "$(pwd)\$($outFile)"
 
+    Write-Host
+    Write-Host "You may optionally specify a filter to apply on the query. Please enter it in a Key=Value format. For multiple, separate them with & (eg. Username=test&Email=test@email.com)" -ForegroundColor Green
+    $filter = Read-Host -Prompt "Query string filter (enter for no filter)"
+
     # Get Data
     Write-Host "Querying data..." -ForegroundColor DarkGray
-    $list = Get-ListRequest $defn
+    $list = Get-ListRequest $defn $filter
     
     # $list[0] | Get-Member | Format-Table
     
@@ -3085,7 +3089,7 @@ function Invoke-ReportProgram
 
                 $props = Get-PropertyNames $ancestorSample
                 $defaults = Get-DefaultSelectedColumns -d $ancestorDefn -names $props
-                $cols = Get-FromChoiceMenu "3.$([char]$point) Choose Ancestor $($ancestorDefn.Name) Properties for Report:" $props -allowMultiple $defaults
+                $cols = Get-FromChoiceMenu "3.$([char]$point) Choose Ancestor ($($ancestorDefn.Name)) Properties for Report:" $props -allowMultiple $defaults
                 $point++
 
                 [void]$depCols.Add(@($cols));
