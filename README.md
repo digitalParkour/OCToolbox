@@ -27,7 +27,9 @@ Using a powershell terminal (preferably windows terminal) run the script file:
 
 The rest is guided by the script.
 
-Demo: [Video Tour](https://clipchamp.com/watch/7CTIVyxEI0L) ~16 min
+### Video
+
+Demo: [Video Tour](https://youtu.be/GEWjtFVuYIA) ~16 min
 
 ---
 
